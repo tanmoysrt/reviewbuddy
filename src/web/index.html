@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>reviewbuddy</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <main class="layout">
+    <aside class="sidebar" id="sidebar">
+      <div class="tabs" role="tablist">
+        <button data-tab="changes" class="on">Changes <span id="changed-count" class="count"></span></button>
+        <button data-tab="browse">Browse</button>
+      </div>
+
+      <input id="filter" type="search" placeholder="Filter files (/)" autocomplete="off" spellcheck="false">
+      <div id="summary" class="summary"></div>
+      <nav id="file-list" class="file-list" tabindex="-1"></nav>
+
+      <div class="sidebar-foot">
+        <button id="theme" class="icon" title="Toggle theme">&#9680;</button>
+        <button id="reload" class="icon" title="Re-read the working tree (r)">&#8635;</button>
+        <button id="help-toggle" class="icon" title="Keyboard shortcuts (?)">?</button>
+      </div>
+    </aside>
+
+    <div class="resizer" id="resizer" role="separator" aria-orientation="vertical"></div>
+
+    <section class="content" id="content"></section>
+  </main>
+
+  <div class="help" id="help" hidden>
+    <div class="help-card">
+      <h2>Shortcuts</h2>
+      <dl>
+        <dt>j / k</dt><dd>next / previous file</dd>
+        <dt>&uarr; / &darr;</dt><dd>walk results while filtering</dd>
+        <dt>n / p</dt><dd>next / previous hunk</dd>
+        <dt>/</dt><dd>filter files</dd>
+        <dt>u</dt><dd>unified / split</dd>
+        <dt>w</dt><dd>wrap long lines</dd>
+        <dt>r</dt><dd>reload from disk</dd>
+        <dt>1 / 2</dt><dd>changes / browse</dd>
+        <dt>Esc</dt><dd>close this</dd>
+      </dl>
+    </div>
+  </div>
+
+  <script src="/app.js" defer></script>
+</body>
+</html>
