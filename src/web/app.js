@@ -331,7 +331,6 @@ async function load() {
     fail(error.message);
   }
   els.content.scrollTop = 0;
-  if (document.activeElement !== els.filter) setPane("content");
 }
 
 /* --------------------------------------------------------------- content */
@@ -629,6 +628,11 @@ function onKey(event) {
     },
     "/": () => els.filter.focus(),
   };
+  if (state.pane === "sidebar") {
+    actions.ArrowDown = () => step(1);
+    actions.ArrowUp = () => step(-1);
+  }
+
   const action = actions[event.key];
   if (action) {
     event.preventDefault();
