@@ -177,10 +177,7 @@ button.icon.on { color: var(--text); background: var(--border); }
 
 .content { flex: 1; overflow: auto; min-width: 0; }
 
-/* The focused pane is the one the keyboard drives. */
 .sidebar:focus, .content:focus, .file-list:focus { outline: none; }
-.sidebar.focused { box-shadow: inset -2px 0 0 var(--accent); }
-.content.focused { box-shadow: inset 2px 0 0 var(--accent); }
 
 /* -------------------------------------------------------------- sidebar */
 
@@ -265,6 +262,7 @@ button.icon.on { color: var(--text); background: var(--border); }
 
 .item:hover { background: var(--panel-2); }
 .item.on { background: var(--panel-2); border-left-color: var(--accent); }
+.sidebar:not(.focused) .item.on { border-left-color: var(--border); }
 
 .item .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; }
 .item .name span { direction: ltr; unicode-bidi: embed; }

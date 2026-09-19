@@ -251,11 +251,6 @@ function setPane(pane) {
   target.focus({ preventScroll: true });
 }
 
-/** Scrolls the diff by a few code lines. */
-function scrollContent(direction) {
-  els.content.scrollBy({ top: direction * 60 });
-}
-
 /* --------------------------------------------------------------- routing */
 
 /* The hash holds both the reviewed commit and the open file, so reloading or
@@ -336,7 +331,7 @@ async function load() {
     fail(error.message);
   }
   els.content.scrollTop = 0;
-  if (state.pane === "content") els.content.focus({ preventScroll: true });
+  if (document.activeElement !== els.filter) setPane("content");
 }
 
 /* --------------------------------------------------------------- content */
@@ -609,13 +604,12 @@ function onKey(event) {
     return;
   }
 
-  const onDiff = state.pane === "content";
   const actions = {
     h: () => setPane("sidebar"),
     l: () => setPane("content"),
-    Tab: () => setPane(onDiff ? "sidebar" : "content"),
-    j: () => (onDiff ? scrollContent(1) : step(1)),
-    k: () => (onDiff ? scrollContent(-1) : step(-1)),
+    Tab: () => setPane(state.pane === "content" ? "sidebar" : "content"),
+    j: () => step(1),
+    k: () => step(-1),
     Enter: () => setPane("content"),
     n: () => hunk(1),
     m: () => hunk(-1),
