@@ -16,8 +16,7 @@ const state = {
   commits: null,
   commit: null,  // when set, review just this commit against its parent
   current: null, // { mode: "diff" | "file", path }
-  listed: [],    // ids currently shown in the sidebar, in order
-  listedKind: "file", // what those ids are: "file" or "commit"
+  listed: [],    // file paths currently shown in the sidebar, in order
 };
 
 const $ = (sel) => document.querySelector(sel);
@@ -28,6 +27,9 @@ const els = {
   list: $("#file-list"),
   content: $("#content"),
   help: $("#help"),
+  picker: $("#picker"),
+  pickerFilter: $("#picker-filter"),
+  pickerList: $("#picker-list"),
 };
 
 /* ------------------------------------------------------------- utilities */
@@ -123,7 +125,6 @@ async function loadMeta() {
 
 function renderSidebar() {
   if (state.tab === "changes") renderChanges();
-  else if (state.tab === "commits") renderCommits();
   else renderBrowse();
 }
 
@@ -136,43 +137,8 @@ function renderChanges() {
     els.list.innerHTML = `<p class="note">${state.meta.files.length ? "No file matches the filter." : "No differences between these refs."}</p>`;
     return;
   }
-  state.listedKind = "file";
   els.list.innerHTML = files.map((f) => itemHtml(f.path, "diff", f)).join("");
   markSelected();
-}
-
-async function renderCommits() {
-  if (!state.commits) {
-    els.list.innerHTML = '<p class="note">Loading&hellip;</p>';
-    try {
-      state.commits = (await api("/api/commits")).commits;
-    } catch (error) {
-      els.list.innerHTML = `<p class="note">${esc(error.message)}</p>`;
-      return;
-    }
-  }
-
-  const needle = state.filter.toLowerCase();
-  const commits = state.commits.filter((c) =>
-    `${c.subject} ${c.author} ${c.short}`.toLowerCase().includes(needle)
-  );
-  state.listedKind = "commit";
-  state.listed = commits.map((c) => c.sha);
-
-  els.list.innerHTML = commits.length
-    ? commits.map(commitHtml).join("")
-    : `<p class="note">${state.commits.length ? "No commit matches the filter." : "No commits in this range."}</p>`;
-  markSelected();
-}
-
-function commitHtml(commit) {
-  return `<button class="item commit" data-kind="commit" data-id="${esc(commit.sha)}"
-      title="${esc(commit.subject)}">
-    <span class="commit-body">
-      <span class="subject">${esc(commit.subject)}</span>
-      <span class="byline">${esc(commit.short)} &middot; ${esc(commit.author)} &middot; ${esc(commit.date)}</span>
-    </span>
-  </button>`;
 }
 
 async function renderBrowse() {
@@ -189,7 +155,6 @@ async function renderBrowse() {
   if (state.filter) {
     const needle = state.filter.toLowerCase();
     const matches = state.tree.filter((p) => p.toLowerCase().includes(needle)).slice(0, 500);
-    state.listedKind = "file";
     state.listed = matches;
     els.list.innerHTML = matches.length
       ? matches.map((p) => itemHtml(p, "file")).join("")
@@ -198,7 +163,6 @@ async function renderBrowse() {
     return;
   }
 
-  state.listedKind = "file";
   state.listed = state.tree;
   els.list.innerHTML = "";
   const tree = document.createElement("div");
@@ -259,9 +223,9 @@ function treeNodes(node) {
 }
 
 function markSelected() {
-  const id = state.listedKind === "commit" ? state.commit : state.current?.path;
+  const path = state.current?.path;
   for (const item of els.list.querySelectorAll(".item")) {
-    const selected = item.dataset.id === id;
+    const selected = item.dataset.id === path;
     item.classList.toggle("on", selected);
     if (selected) item.scrollIntoView({ block: "nearest" });
   }
@@ -314,7 +278,7 @@ async function route() {
     state.commit = commit;
     state.tree = null;
     if (!(await loadMeta())) return;
-    if (commit && state.tab === "browse") setTab("changes");
+      if (commit) setTab("changes");
   }
 
   if (!mode) {
@@ -525,14 +489,14 @@ function toggleTheme() {
 function wireControls() {
   els.list.addEventListener("click", (event) => {
     const item = event.target.closest(".item");
-    if (!item) return;
-    if (item.dataset.kind === "commit") openCommit(item.dataset.id);
-    else open(item.dataset.mode, item.dataset.id);
+    if (item) open(item.dataset.mode, item.dataset.id);
   });
 
   els.summary.addEventListener("click", (event) => {
-    if (event.target.closest("#clear-scope")) location.hash = hashFor(null, null, null);
+    if (event.target.closest("#clear-scope")) showEverything();
   });
+
+  wirePicker();
 
   for (const button of document.querySelectorAll("[data-tab]")) {
     button.addEventListener("click", () => setTab(button.dataset.tab));
@@ -576,13 +540,9 @@ async function reload() {
 }
 
 function step(delta) {
-  const commits = state.listedKind === "commit";
-  const current = commits ? state.commit : state.current?.path;
-  const index = state.listed.indexOf(current);
+  const index = state.listed.indexOf(state.current?.path);
   const next = state.listed[Math.max(0, Math.min(state.listed.length - 1, index + delta))];
-  if (!next) return;
-  if (commits) openCommit(next);
-  else open(state.tab === "browse" ? "file" : "diff", next);
+  if (next) open(state.tab === "browse" ? "file" : "diff", next);
 }
 
 /** Scrolls to the next or previous hunk header in the current file. */
@@ -609,8 +569,7 @@ function onKey(event) {
       if (event.key === "ArrowDown") step(1);
       else if (event.key === "ArrowUp") step(-1);
       else if (event.key === "Enter") {
-        const current = state.listedKind === "commit" ? state.commit : state.current?.path;
-        if (state.listed.includes(current)) els.filter.blur();
+        if (state.listed.includes(state.current?.path)) els.filter.blur();
         else step(1);
       } else return;
       event.preventDefault();
@@ -627,10 +586,14 @@ function onKey(event) {
     w: () => toggleWrap(),
     r: () => reload(),
     1: () => setTab("changes"),
-    2: () => setTab("commits"),
-    3: () => setTab("browse"),
+    2: () => setTab("browse"),
+    c: () => openPicker(),
+    a: () => showEverything(),
     "?": () => (els.help.hidden = !els.help.hidden),
-    Escape: () => (els.help.hidden = true),
+    Escape: () => {
+      els.help.hidden = true;
+      closePicker();
+    },
     "/": () => els.filter.focus(),
   };
   const action = actions[event.key];
@@ -638,6 +601,114 @@ function onKey(event) {
     event.preventDefault();
     action();
   }
+}
+
+/* ---------------------------------------------------------------- picker */
+
+/* A commit is chosen from an overlay rather than a sidebar tab: reviewing is
+   mostly about files, and the commit you want is a search away when it is. */
+
+const picker = { rows: [], index: 0 };
+
+async function openPicker() {
+  els.picker.hidden = false;
+  els.pickerFilter.value = "";
+  els.pickerList.innerHTML = '<p class="note">Loading&hellip;</p>';
+  els.pickerFilter.focus();
+
+  if (!state.commits) {
+    try {
+      state.commits = (await api("/api/commits")).commits;
+    } catch (error) {
+      els.pickerList.innerHTML = `<p class="note">${esc(error.message)}</p>`;
+      return;
+    }
+  }
+  renderPicker();
+}
+
+function closePicker() {
+  els.picker.hidden = true;
+}
+
+function renderPicker() {
+  const needle = els.pickerFilter.value.trim().toLowerCase();
+  const matches = state.commits.filter((c) =>
+    `${c.subject} ${c.author} ${c.short}`.toLowerCase().includes(needle)
+  );
+
+  picker.rows = [{ sha: null, subject: "Everything", byline: "the whole branch" }, ...matches];
+  picker.index = Math.max(0, picker.rows.findIndex((row) => row.sha === state.commit));
+
+  els.pickerList.innerHTML = picker.rows
+    .map(
+      (row, i) => `<button class="picker-row${i === picker.index ? " on" : ""}" data-index="${i}">
+        <span class="subject">${esc(row.subject)}</span>
+        <span class="byline">${esc(row.byline ?? `${row.short} \u00b7 ${row.author} \u00b7 ${row.date}`)}</span>
+      </button>`
+    )
+    .join("");
+  if (!matches.length && needle) {
+    els.pickerList.insertAdjacentHTML("beforeend", '<p class="note">No commit matches.</p>');
+  }
+  highlightPicker();
+}
+
+function highlightPicker() {
+  const rows = els.pickerList.querySelectorAll(".picker-row");
+  rows.forEach((row, i) => {
+    const on = i === picker.index;
+    row.classList.toggle("on", on);
+    if (on) row.scrollIntoView({ block: "nearest" });
+  });
+}
+
+function movePicker(delta) {
+  if (!picker.rows.length) return;
+  picker.index = Math.max(0, Math.min(picker.rows.length - 1, picker.index + delta));
+  highlightPicker();
+}
+
+function choosePicker() {
+  const row = picker.rows[picker.index];
+  if (!row) return;
+  closePicker();
+  if (row.sha) openCommit(row.sha);
+  else showEverything();
+}
+
+/** Drops back to the full branch comparison. */
+function showEverything() {
+  closePicker();
+  if (state.commit) location.hash = hashFor(null, null, null);
+}
+
+function wirePicker() {
+  els.picker.addEventListener("click", (event) => {
+    const row = event.target.closest(".picker-row");
+    if (row) {
+      picker.index = Number(row.dataset.index);
+      choosePicker();
+    } else if (event.target === els.picker) {
+      closePicker();
+    }
+  });
+
+  els.pickerFilter.addEventListener("input", renderPicker);
+
+  // Handled here so the document level shortcuts never see these keys.
+  els.pickerFilter.addEventListener("keydown", (event) => {
+    if (event.key === "ArrowDown") movePicker(1);
+    else if (event.key === "ArrowUp") movePicker(-1);
+    else if (event.key === "Enter") choosePicker();
+    else if (event.key === "Escape") closePicker();
+    else {
+      event.stopPropagation();
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+  });
 }
 
 function wireResizer() {

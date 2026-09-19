@@ -241,25 +241,7 @@ button.icon.on { color: var(--text); background: var(--border); }
 
 .summary .clear:hover { color: var(--text); border-color: var(--accent); }
 
-/* Commit rows stack a subject over its byline. */
-.item.commit { align-items: flex-start; padding: 6px 12px; }
 
-.commit-body { display: flex; flex-direction: column; min-width: 0; gap: 1px; }
-
-.commit-body .subject {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.commit-body .byline {
-  color: var(--dim);
-  font-family: var(--mono);
-  font-size: 11px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 
 .file-list { flex: 1; overflow: auto; padding-bottom: 24px; outline: none; }
 
@@ -430,6 +412,70 @@ table.diff.plain .code::before { content: none; margin: 0; width: 0; }
 .t { color: var(--tok-t); }
 .o { color: var(--tok-o); }
 .e { color: var(--tok-e); }
+
+/* --------------------------------------------------------------- picker */
+
+.picker[hidden] { display: none; }
+
+.picker {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: start center;
+  padding-top: 12vh;
+  background: rgba(0, 0, 0, 0.5);
+}
+
+.picker-card {
+  width: min(680px, 92vw);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.45);
+}
+
+#picker-filter {
+  display: block;
+  width: 100%;
+  margin: 0;
+  padding: 12px 14px;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
+  outline: none;
+  font-size: 15px;
+}
+
+.picker-list { max-height: 52vh; overflow: auto; }
+
+.picker-row {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  width: 100%;
+  padding: 7px 14px;
+  border: none;
+  border-left: 2px solid transparent;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+}
+
+.picker-row:hover { background: var(--panel-2); }
+.picker-row.on { background: var(--panel-2); border-left-color: var(--accent); }
+
+.picker-row .subject { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.picker-row .byline {
+  color: var(--dim);
+  font-family: var(--mono);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 /* ----------------------------------------------------------------- help */
 
