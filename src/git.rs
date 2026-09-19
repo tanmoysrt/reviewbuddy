@@ -9,6 +9,10 @@ use std::process::Command;
 use anyhow::{Context, Result, anyhow, bail};
 use serde::Serialize;
 
+/// git's hash for the empty tree, which stands in as the parent of a root
+/// commit so that its diff shows the whole thing being added.
+const EMPTY_TREE: &str = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
+
 /// Where the content of one side of the comparison comes from.
 #[derive(Clone, Debug)]
 pub enum Side {
@@ -69,6 +73,16 @@ impl FileEntry {
     pub fn base_path(&self) -> &str {
         self.old_path.as_deref().unwrap_or(&self.path)
     }
+}
+
+/// One commit in the reviewed range.
+#[derive(Clone, Debug, Serialize)]
+pub struct CommitInfo {
+    pub sha: String,
+    pub short: String,
+    pub subject: String,
+    pub author: String,
+    pub date: String,
 }
 
 /// A commit, described for display.
@@ -147,6 +161,37 @@ impl Repo {
             }
         }
         "main".to_string()
+    }
+
+    /// What a commit should be diffed against: its first parent, or the empty
+    /// tree when it is a root commit and has none.
+    pub fn first_parent(&self, sha: &str) -> String {
+        let spec = format!("{sha}^1^{{commit}}");
+        self.try_text(&["rev-parse", "--verify", "--quiet", &spec])
+            .unwrap_or_else(|| EMPTY_TREE.to_string())
+    }
+
+    /// The commits reachable from head but not from base, newest first.
+    pub fn commits(&self, base: &str, head: &Side) -> Result<Vec<CommitInfo>> {
+        let head_rev = match head {
+            Side::Rev(rev) => rev.as_str(),
+            Side::Worktree => "HEAD",
+        };
+        let range = format!("{base}..{head_rev}");
+        let out = self.text(&["log", "--format=%H%x1f%h%x1f%an%x1f%ar%x1f%s", &range])?;
+        Ok(out
+            .lines()
+            .filter_map(|line| {
+                let mut fields = line.split('\u{1f}');
+                Some(CommitInfo {
+                    sha: fields.next()?.to_string(),
+                    short: fields.next()?.to_string(),
+                    author: fields.next()?.to_string(),
+                    date: fields.next()?.to_string(),
+                    subject: fields.next().unwrap_or_default().to_string(),
+                })
+            })
+            .collect())
     }
 
     pub fn merge_base(&self, a: &str, b: &str) -> Result<String> {

@@ -12,10 +12,11 @@
     <aside class="sidebar" id="sidebar">
       <div class="tabs" role="tablist">
         <button data-tab="changes" class="on">Changes <span id="changed-count" class="count"></span></button>
+        <button data-tab="commits">Commits</button>
         <button data-tab="browse">Browse</button>
       </div>
 
-      <input id="filter" type="search" placeholder="Filter files (/)" autocomplete="off" spellcheck="false">
+      <input id="filter" type="search" placeholder="Filter (/)" autocomplete="off" spellcheck="false">
       <div id="summary" class="summary"></div>
       <nav id="file-list" class="file-list" tabindex="-1"></nav>
 
@@ -42,7 +43,7 @@
         <dt>u</dt><dd>unified / split</dd>
         <dt>w</dt><dd>wrap long lines</dd>
         <dt>r</dt><dd>reload from disk</dd>
-        <dt>1 / 2</dt><dd>changes / browse</dd>
+        <dt>1 / 2 / 3</dt><dd>changes / commits / browse</dd>
         <dt>Esc</dt><dd>close this</dd>
       </dl>
     </div>

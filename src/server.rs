@@ -12,6 +12,23 @@ use tiny_http::{Header, Request, Response, Server};
 use crate::diff::{self, Context, Input};
 use crate::git::{self, FileEntry, RefInfo, Repo, Side};
 
+/// What to diff against what. The configured branch comparison by default, or
+/// a single commit against its parent when the UI asks for one.
+#[derive(Clone)]
+pub struct Comparison {
+    pub base: String,
+    pub head: Side,
+}
+
+impl Comparison {
+    fn key(&self) -> String {
+        match &self.head {
+            Side::Rev(rev) => format!("{}..{}", self.base, rev),
+            Side::Worktree => format!("{}..worktree", self.base),
+        }
+    }
+}
+
 const INDEX_HTML: &str = include_str!("web/index.html");
 const APP_JS: &str = include_str!("web/app.js");
 const STYLE_CSS: &str = include_str!("web/style.css");
@@ -32,8 +49,9 @@ pub struct App {
     pub head_info: RefInfo,
     pub merge_base: bool,
     pub context: usize,
-    /// The changed-file list, refreshed whenever the UI asks for metadata.
-    files: Mutex<Vec<FileEntry>>,
+    /// Changed-file lists per comparison, refreshed whenever the UI asks for
+    /// metadata; commit ranges never change, so their entries stay valid.
+    files: Mutex<HashMap<String, Vec<FileEntry>>>,
 }
 
 impl App {
@@ -46,23 +64,48 @@ impl App {
         merge_base: bool,
         context: usize,
     ) -> App {
-        App { repo, base, head, base_info, head_info, merge_base, context, files: Mutex::new(Vec::new()) }
+        App {
+            repo,
+            base,
+            head,
+            base_info,
+            head_info,
+            merge_base,
+            context,
+            files: Mutex::new(HashMap::new()),
+        }
     }
 
-    /// Re-reads the comparison from git and caches it.
-    pub fn refresh(&self) -> Result<Vec<FileEntry>> {
-        let entries = self.repo.changed_files(&self.base, &self.head)?;
-        *self.files.lock().unwrap() = entries.clone();
+    /// The branch comparison reviewbuddy was started with.
+    pub fn branch_comparison(&self) -> Comparison {
+        Comparison { base: self.base.clone(), head: self.head.clone() }
+    }
+
+    /// Reads the `commit` parameter, falling back to the branch comparison.
+    fn comparison(&self, params: &HashMap<String, String>) -> Result<Comparison> {
+        let Some(rev) = params.get("commit").filter(|v| !v.is_empty()) else {
+            return Ok(self.branch_comparison());
+        };
+        let sha = self.repo.resolve(rev)?;
+        Ok(Comparison { base: self.repo.first_parent(&sha), head: Side::Rev(sha) })
+    }
+
+    /// The changed files for a comparison. `refresh` re-reads from git, which
+    /// matters only for the working tree since it changes under us.
+    pub fn files(&self, comparison: &Comparison, refresh: bool) -> Result<Vec<FileEntry>> {
+        let key = comparison.key();
+        if !refresh {
+            if let Some(hit) = self.files.lock().unwrap().get(&key) {
+                return Ok(hit.clone());
+            }
+        }
+        let entries = self.repo.changed_files(&comparison.base, &comparison.head)?;
+        self.files.lock().unwrap().insert(key, entries.clone());
         Ok(entries)
     }
 
-    /// Looks a file up in the cache, refreshing once if it is not there yet.
-    fn entry(&self, path: &str) -> Result<FileEntry> {
-        let cached = self.files.lock().unwrap().iter().find(|e| e.path == path).cloned();
-        if let Some(entry) = cached {
-            return Ok(entry);
-        }
-        self.refresh()?
+    fn entry(&self, comparison: &Comparison, path: &str) -> Result<FileEntry> {
+        self.files(comparison, false)?
             .into_iter()
             .find(|e| e.path == path)
             .ok_or_else(|| anyhow!("'{path}' is not part of this comparison"))
@@ -150,10 +193,11 @@ fn route(app: &App, url: &str) -> Reply {
         "/fonts/JetBrainsMono-Regular.woff2" => Reply::font(FONT_REGULAR),
         "/fonts/JetBrainsMono-Italic.woff2" => Reply::font(FONT_ITALIC),
         "/fonts/JetBrainsMono-Bold.woff2" => Reply::font(FONT_BOLD),
-        "/api/meta" => into_reply(meta(app)),
+        "/api/meta" => into_reply(meta(app, &params)),
+        "/api/commits" => into_reply(commits(app)),
         "/api/diff" => into_reply(file_diff(app, &params)),
         "/api/file" => into_reply(file_view(app, &params)),
-        "/api/tree" => into_reply(tree(app)),
+        "/api/tree" => into_reply(tree(app, &params)),
         _ => Reply::error(404, "no such endpoint"),
     }
 }
@@ -174,33 +218,53 @@ struct Meta<'a> {
     files: Vec<FileEntry>,
 }
 
-fn meta(app: &App) -> Result<Reply> {
-    let files = app.refresh()?;
+fn meta(app: &App, params: &HashMap<String, String>) -> Result<Reply> {
+    let comparison = app.comparison(params)?;
+    let files = app.files(&comparison, true)?;
+    let scoped = params.contains_key("commit");
+
+    // When scoped to one commit, describe that commit rather than the branches.
+    let (base_info, head_info);
+    let (base, head) = match &comparison.head {
+        Side::Rev(sha) if scoped => {
+            base_info = app.repo.describe("parent", &comparison.base);
+            head_info = app.repo.describe(&app.repo.describe("", sha).short, sha);
+            (&base_info, &head_info)
+        }
+        _ => (&app.base_info, &app.head_info),
+    };
+
     Ok(Reply::json(&Meta {
         repo: app.repo.name(),
         branch: app.repo.current_branch(),
-        base: &app.base_info,
-        head: &app.head_info,
-        merge_base: app.merge_base,
-        worktree: matches!(app.head, Side::Worktree),
+        base,
+        head,
+        merge_base: app.merge_base && !scoped,
+        worktree: matches!(comparison.head, Side::Worktree),
         context: app.context,
         files,
     }))
 }
 
+fn commits(app: &App) -> Result<Reply> {
+    let commits = app.repo.commits(&app.base, &app.head)?;
+    Ok(Reply::json(&json!({ "commits": commits })))
+}
+
 fn file_diff(app: &App, params: &HashMap<String, String>) -> Result<Reply> {
     let path = require(params, "path")?;
     let context = Context::parse(params.get("ctx").map(String::as_str).unwrap_or("3"));
-    let entry = app.entry(path)?;
+    let comparison = app.comparison(params)?;
+    let entry = app.entry(&comparison, path)?;
 
-    let base_side = Side::Rev(app.base.clone());
+    let base_side = Side::Rev(comparison.base.clone());
     let old_raw = match entry.status.is_new() {
         true => None,
         false => app.repo.read(&base_side, entry.base_path())?,
     };
     let new_raw = match entry.status.is_deleted() {
         true => None,
-        false => app.repo.read(&app.head, &entry.path)?,
+        false => app.repo.read(&comparison.head, &entry.path)?,
     };
 
     let (old_text, old_binary) = decode(old_raw);
@@ -223,16 +287,18 @@ fn file_diff(app: &App, params: &HashMap<String, String>) -> Result<Reply> {
 
 fn file_view(app: &App, params: &HashMap<String, String>) -> Result<Reply> {
     let path = require(params, "path")?;
+    let comparison = app.comparison(params)?;
     let side = match params.get("side").map(String::as_str) {
-        Some("base") => Side::Rev(app.base.clone()),
-        _ => app.head.clone(),
+        Some("base") => Side::Rev(comparison.base),
+        _ => comparison.head,
     };
     let (text, binary) = decode(app.repo.read(&side, path)?);
     Ok(Reply::json(&diff::view(path, text.as_deref(), binary)))
 }
 
-fn tree(app: &App) -> Result<Reply> {
-    Ok(Reply::json(&json!({ "files": app.repo.list_files(&app.head)? })))
+fn tree(app: &App, params: &HashMap<String, String>) -> Result<Reply> {
+    let comparison = app.comparison(params)?;
+    Ok(Reply::json(&json!({ "files": app.repo.list_files(&comparison.head)? })))
 }
 
 /// Decodes a blob, reporting anything that is not valid UTF-8 text as binary.

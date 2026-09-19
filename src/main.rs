@@ -95,7 +95,7 @@ fn run(args: Args) -> Result<()> {
         merge_base,
         args.context,
     ));
-    let files = app.refresh()?;
+    let files = app.files(&app.branch_comparison(), true)?;
 
     let server = Server::http(("127.0.0.1", args.port))
         .map_err(|e| anyhow::anyhow!("cannot listen on port {}: {e}", args.port))?;

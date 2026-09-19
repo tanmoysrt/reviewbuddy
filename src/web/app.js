@@ -13,8 +13,11 @@ const state = {
   ctx: store("ctx", "3"),
   wrap: store("wrap", "0") === "1",
   tree: null,
+  commits: null,
+  commit: null,  // when set, review just this commit against its parent
   current: null, // { mode: "diff" | "file", path }
-  listed: [],    // paths currently shown in the sidebar, in order
+  listed: [],    // ids currently shown in the sidebar, in order
+  listedKind: "file", // what those ids are: "file" or "commit"
 };
 
 const $ = (sel) => document.querySelector(sel);
@@ -65,6 +68,11 @@ function stat(additions, deletions) {
   return parts.join(" ");
 }
 
+/** Adds the reviewed commit, when one is selected, to a request. */
+function scoped(params) {
+  return state.commit ? { ...params, commit: state.commit } : params;
+}
+
 async function api(endpoint, params) {
   const url = new URL(endpoint, location.origin);
   for (const [key, value] of Object.entries(params || {})) url.searchParams.set(key, value);
@@ -89,7 +97,7 @@ async function boot() {
 
 async function loadMeta() {
   try {
-    state.meta = await api("/api/meta");
+    state.meta = await api("/api/meta", scoped({}));
   } catch (error) {
     fail(`could not talk to reviewbuddy: ${error.message}`);
     return false;
@@ -102,7 +110,11 @@ async function loadMeta() {
   const additions = meta.files.reduce((sum, f) => sum + f.additions, 0);
   const deletions = meta.files.reduce((sum, f) => sum + f.deletions, 0);
   els.changedCount.textContent = meta.files.length;
-  els.summary.innerHTML = `${meta.files.length} file${meta.files.length === 1 ? "" : "s"} &middot; ${stat(additions, deletions) || "no line changes"}`;
+  const counts = `${meta.files.length} file${meta.files.length === 1 ? "" : "s"} &middot; ${stat(additions, deletions) || "no line changes"}`;
+  els.summary.innerHTML = state.commit
+    ? `<button id="clear-scope" class="clear" title="Back to the whole branch">&larr;</button>
+       <b title="${esc(meta.head.subject)}">${esc(meta.head.short)}</b> ${counts}`
+    : counts;
   renderSidebar();
   return true;
 }
@@ -111,6 +123,7 @@ async function loadMeta() {
 
 function renderSidebar() {
   if (state.tab === "changes") renderChanges();
+  else if (state.tab === "commits") renderCommits();
   else renderBrowse();
 }
 
@@ -123,15 +136,50 @@ function renderChanges() {
     els.list.innerHTML = `<p class="note">${state.meta.files.length ? "No file matches the filter." : "No differences between these refs."}</p>`;
     return;
   }
+  state.listedKind = "file";
   els.list.innerHTML = files.map((f) => itemHtml(f.path, "diff", f)).join("");
   markSelected();
+}
+
+async function renderCommits() {
+  if (!state.commits) {
+    els.list.innerHTML = '<p class="note">Loading&hellip;</p>';
+    try {
+      state.commits = (await api("/api/commits")).commits;
+    } catch (error) {
+      els.list.innerHTML = `<p class="note">${esc(error.message)}</p>`;
+      return;
+    }
+  }
+
+  const needle = state.filter.toLowerCase();
+  const commits = state.commits.filter((c) =>
+    `${c.subject} ${c.author} ${c.short}`.toLowerCase().includes(needle)
+  );
+  state.listedKind = "commit";
+  state.listed = commits.map((c) => c.sha);
+
+  els.list.innerHTML = commits.length
+    ? commits.map(commitHtml).join("")
+    : `<p class="note">${state.commits.length ? "No commit matches the filter." : "No commits in this range."}</p>`;
+  markSelected();
+}
+
+function commitHtml(commit) {
+  return `<button class="item commit" data-kind="commit" data-id="${esc(commit.sha)}"
+      title="${esc(commit.subject)}">
+    <span class="commit-body">
+      <span class="subject">${esc(commit.subject)}</span>
+      <span class="byline">${esc(commit.short)} &middot; ${esc(commit.author)} &middot; ${esc(commit.date)}</span>
+    </span>
+  </button>`;
 }
 
 async function renderBrowse() {
   if (!state.tree) {
     els.list.innerHTML = '<p class="note">Loading&hellip;</p>';
     try {
-      state.tree = (await api("/api/tree")).files;
+      state.tree = (await api("/api/tree", scoped({}))).files;
     } catch (error) {
       els.list.innerHTML = `<p class="note">${esc(error.message)}</p>`;
       return;
@@ -141,6 +189,7 @@ async function renderBrowse() {
   if (state.filter) {
     const needle = state.filter.toLowerCase();
     const matches = state.tree.filter((p) => p.toLowerCase().includes(needle)).slice(0, 500);
+    state.listedKind = "file";
     state.listed = matches;
     els.list.innerHTML = matches.length
       ? matches.map((p) => itemHtml(p, "file")).join("")
@@ -149,6 +198,7 @@ async function renderBrowse() {
     return;
   }
 
+  state.listedKind = "file";
   state.listed = state.tree;
   els.list.innerHTML = "";
   const tree = document.createElement("div");
@@ -163,7 +213,7 @@ function itemHtml(path, mode, entry) {
     ? `<span class="badge ${entry.status}" title="${entry.status}">${STATUS_LETTER[entry.status] || "?"}</span>`
     : "";
   const counts = entry ? `<span class="stat">${stat(entry.additions, entry.deletions)}</span>` : "";
-  return `<button class="item" data-mode="${mode}" data-path="${esc(path)}" title="${esc(path)}">
+  return `<button class="item" data-kind="file" data-mode="${mode}" data-id="${esc(path)}" title="${esc(path)}">
     ${badge}<span class="name"><span>${pathHtml(path)}</span></span>${counts}
   </button>`;
 }
@@ -209,9 +259,9 @@ function treeNodes(node) {
 }
 
 function markSelected() {
-  const path = state.current?.path;
+  const id = state.listedKind === "commit" ? state.commit : state.current?.path;
   for (const item of els.list.querySelectorAll(".item")) {
-    const selected = item.dataset.path === path;
+    const selected = item.dataset.id === id;
     item.classList.toggle("on", selected);
     if (selected) item.scrollIntoView({ block: "nearest" });
   }
@@ -219,27 +269,70 @@ function markSelected() {
 
 /* --------------------------------------------------------------- routing */
 
-function open(mode, path) {
-  location.hash = `${mode === "diff" ? "d" : "f"}/${encodeURIComponent(path)}`;
+/* The hash holds both the reviewed commit and the open file, so reloading or
+   going back keeps you where you were:
+     #d/<path>            a file in the branch comparison
+     #c/<sha>             a commit, no file open yet
+     #c/<sha>/d/<path>    a file within that commit                        */
+
+function hashFor(commit, mode, path) {
+  const scope = commit ? `c/${commit}/` : "";
+  const file = mode ? `${mode === "diff" ? "d" : "f"}/${encodeURIComponent(path)}` : "";
+  return `#${scope}${file}`;
 }
 
-function route() {
-  const match = /^#(d|f)\/(.*)$/.exec(location.hash);
-  if (!match) {
+function parseHash() {
+  let rest = location.hash.slice(1);
+  let commit = null;
+  if (rest.startsWith("c/")) {
+    rest = rest.slice(2);
+    const cut = rest.indexOf("/");
+    commit = cut === -1 ? rest : rest.slice(0, cut);
+    rest = cut === -1 ? "" : rest.slice(cut + 1);
+  }
+  const match = /^(d|f)\/(.*)$/.exec(rest);
+  return {
+    commit: commit || null,
+    mode: match ? (match[1] === "d" ? "diff" : "file") : null,
+    path: match ? decodeURIComponent(match[2]) : null,
+  };
+}
+
+function open(mode, path) {
+  location.hash = hashFor(state.commit, mode, path);
+}
+
+function openCommit(sha) {
+  location.hash = hashFor(sha, null, null);
+}
+
+async function route() {
+  const { commit, mode, path } = parseHash();
+
+  // Changing scope changes what every other endpoint returns.
+  if (commit !== state.commit) {
+    state.commit = commit;
+    state.tree = null;
+    if (!(await loadMeta())) return;
+    if (commit && state.tab === "browse") setTab("changes");
+  }
+
+  if (!mode) {
     state.current = null;
     markSelected();
     welcome();
     return;
   }
-  state.current = { mode: match[1] === "d" ? "diff" : "file", path: decodeURIComponent(match[2]) };
+  state.current = { mode, path };
   markSelected();
   load();
 }
 
 function welcome() {
   const count = state.meta?.files.length ?? 0;
+  const what = state.commit ? "this commit" : "these refs";
   els.content.innerHTML = `<div class="placeholder">
-    <div>${count ? "Pick a file to review." : "No differences between these refs."}</div>
+    <div>${count ? "Pick a file to review." : `Nothing changed in ${what}.`}</div>
     <div>Press <b>?</b> for shortcuts.</div>
   </div>`;
 }
@@ -248,8 +341,8 @@ async function load() {
   const { mode, path } = state.current;
   els.content.classList.toggle("wrap", state.wrap);
   try {
-    if (mode === "diff") renderDiff(await api("/api/diff", { path, ctx: state.ctx }));
-    else renderFile(await api("/api/file", { path }));
+    if (mode === "diff") renderDiff(await api("/api/diff", scoped({ path, ctx: state.ctx })));
+    else renderFile(await api("/api/file", scoped({ path })));
   } catch (error) {
     fail(error.message);
   }
@@ -432,7 +525,13 @@ function toggleTheme() {
 function wireControls() {
   els.list.addEventListener("click", (event) => {
     const item = event.target.closest(".item");
-    if (item) open(item.dataset.mode, item.dataset.path);
+    if (!item) return;
+    if (item.dataset.kind === "commit") openCommit(item.dataset.id);
+    else open(item.dataset.mode, item.dataset.id);
+  });
+
+  els.summary.addEventListener("click", (event) => {
+    if (event.target.closest("#clear-scope")) location.hash = hashFor(null, null, null);
   });
 
   for (const button of document.querySelectorAll("[data-tab]")) {
@@ -471,14 +570,19 @@ function wireControls() {
 
 async function reload() {
   state.tree = null;
+  state.commits = null;
   await loadMeta();
   if (state.current) load();
 }
 
 function step(delta) {
-  const index = state.listed.indexOf(state.current?.path);
+  const commits = state.listedKind === "commit";
+  const current = commits ? state.commit : state.current?.path;
+  const index = state.listed.indexOf(current);
   const next = state.listed[Math.max(0, Math.min(state.listed.length - 1, index + delta))];
-  if (next) open(state.tab === "changes" ? "diff" : "file", next);
+  if (!next) return;
+  if (commits) openCommit(next);
+  else open(state.tab === "browse" ? "file" : "diff", next);
 }
 
 /** Scrolls to the next or previous hunk header in the current file. */
@@ -505,7 +609,8 @@ function onKey(event) {
       if (event.key === "ArrowDown") step(1);
       else if (event.key === "ArrowUp") step(-1);
       else if (event.key === "Enter") {
-        if (state.listed.includes(state.current?.path)) els.filter.blur();
+        const current = state.listedKind === "commit" ? state.commit : state.current?.path;
+        if (state.listed.includes(current)) els.filter.blur();
         else step(1);
       } else return;
       event.preventDefault();
@@ -522,7 +627,8 @@ function onKey(event) {
     w: () => toggleWrap(),
     r: () => reload(),
     1: () => setTab("changes"),
-    2: () => setTab("browse"),
+    2: () => setTab("commits"),
+    3: () => setTab("browse"),
     "?": () => (els.help.hidden = !els.help.hidden),
     Escape: () => (els.help.hidden = true),
     "/": () => els.filter.focus(),
