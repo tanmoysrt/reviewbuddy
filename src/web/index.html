@@ -28,24 +28,25 @@
 
     <div class="resizer" id="resizer" role="separator" aria-orientation="vertical"></div>
 
-    <section class="content" id="content"></section>
+    <section class="content" id="content" tabindex="0"></section>
   </main>
 
   <div class="help" id="help" hidden>
     <div class="help-card">
       <h2>Shortcuts</h2>
       <dl>
-        <dt>j / k</dt><dd>next / previous file</dd>
-        <dt>&uarr; / &darr;</dt><dd>walk results while filtering</dd>
-        <dt>n / p</dt><dd>next / previous hunk</dd>
+        <dt>h / l</dt><dd>focus the list / the diff</dd>
+        <dt>Tab</dt><dd>swap focus</dd>
+        <dt>j / k</dt><dd>move through files, or scroll the diff</dd>
+        <dt>Enter</dt><dd>open the file and jump into it</dd>
+        <dt>n / m</dt><dd>next / previous hunk</dd>
         <dt>/</dt><dd>filter files</dd>
-        <dt>u</dt><dd>unified / split</dd>
-        <dt>w</dt><dd>wrap long lines</dd>
+        <dt>&uarr; / &darr;</dt><dd>walk results while filtering</dd>
+        <dt>c / a</dt><dd>jump to a commit / show everything</dd>
+        <dt>u / w</dt><dd>unified or split / wrap long lines</dd>
         <dt>r</dt><dd>reload from disk</dd>
-        <dt>c</dt><dd>jump to a commit</dd>
-        <dt>a</dt><dd>show everything again</dd>
         <dt>1 / 2</dt><dd>changes / browse</dd>
-        <dt>Esc</dt><dd>close this</dd>
+        <dt>Esc</dt><dd>back to the list, or close this</dd>
       </dl>
     </div>
   </div>

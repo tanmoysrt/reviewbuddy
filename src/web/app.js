@@ -15,12 +15,14 @@ const state = {
   tree: null,
   commits: null,
   commit: null,  // when set, review just this commit against its parent
+  pane: "sidebar", // which half the keyboard drives: "sidebar" or "content"
   current: null, // { mode: "diff" | "file", path }
   listed: [],    // file paths currently shown in the sidebar, in order
 };
 
 const $ = (sel) => document.querySelector(sel);
 const els = {
+  sidebar: $("#sidebar"),
   changedCount: $("#changed-count"),
   summary: $("#summary"),
   filter: $("#filter"),
@@ -95,6 +97,7 @@ async function boot() {
   els.content.classList.toggle("wrap", state.wrap);
   wireControls();
   if (await loadMeta()) route();
+  setPane("sidebar");
 }
 
 async function loadMeta() {
@@ -231,6 +234,28 @@ function markSelected() {
   }
 }
 
+/* ----------------------------------------------------------------- focus */
+
+/* Two panes share the keyboard. The focused one is outlined, and j/k mean
+   "next file" on the left but "scroll" on the right. */
+
+function markPane(pane) {
+  state.pane = pane;
+  els.sidebar.classList.toggle("focused", pane === "sidebar");
+  els.content.classList.toggle("focused", pane === "content");
+}
+
+function setPane(pane) {
+  markPane(pane);
+  const target = pane === "content" ? els.content : els.list;
+  target.focus({ preventScroll: true });
+}
+
+/** Scrolls the diff by a few code lines. */
+function scrollContent(direction) {
+  els.content.scrollBy({ top: direction * 60 });
+}
+
 /* --------------------------------------------------------------- routing */
 
 /* The hash holds both the reviewed commit and the open file, so reloading or
@@ -278,7 +303,7 @@ async function route() {
     state.commit = commit;
     state.tree = null;
     if (!(await loadMeta())) return;
-      if (commit) setTab("changes");
+    if (commit) setTab("changes");
   }
 
   if (!mode) {
@@ -311,6 +336,7 @@ async function load() {
     fail(error.message);
   }
   els.content.scrollTop = 0;
+  if (state.pane === "content") els.content.focus({ preventScroll: true });
 }
 
 /* --------------------------------------------------------------- content */
@@ -469,6 +495,7 @@ function toggleWrap() {
 
 function setTab(tab) {
   state.tab = tab;
+  setPane("sidebar");
   for (const button of document.querySelectorAll("[data-tab]")) {
     button.classList.toggle("on", button.dataset.tab === tab);
   }
@@ -488,9 +515,13 @@ function toggleTheme() {
 
 function wireControls() {
   els.list.addEventListener("click", (event) => {
+    markPane("sidebar");
     const item = event.target.closest(".item");
     if (item) open(item.dataset.mode, item.dataset.id);
   });
+
+  els.content.addEventListener("focusin", () => markPane("content"));
+  els.list.addEventListener("focusin", () => markPane("sidebar"));
 
   els.summary.addEventListener("click", (event) => {
     if (event.target.closest("#clear-scope")) showEverything();
@@ -565,6 +596,7 @@ function onKey(event) {
     if (event.key === "Escape") {
       els.help.hidden = true;
       event.target.blur();
+      setPane("sidebar");
     } else if (event.target === els.filter) {
       if (event.key === "ArrowDown") step(1);
       else if (event.key === "ArrowUp") step(-1);
@@ -577,11 +609,16 @@ function onKey(event) {
     return;
   }
 
+  const onDiff = state.pane === "content";
   const actions = {
-    j: () => step(1),
-    k: () => step(-1),
+    h: () => setPane("sidebar"),
+    l: () => setPane("content"),
+    Tab: () => setPane(onDiff ? "sidebar" : "content"),
+    j: () => (onDiff ? scrollContent(1) : step(1)),
+    k: () => (onDiff ? scrollContent(-1) : step(-1)),
+    Enter: () => setPane("content"),
     n: () => hunk(1),
-    p: () => hunk(-1),
+    m: () => hunk(-1),
     u: () => setView(state.view === "unified" ? "split" : "unified"),
     w: () => toggleWrap(),
     r: () => reload(),
@@ -591,8 +628,10 @@ function onKey(event) {
     a: () => showEverything(),
     "?": () => (els.help.hidden = !els.help.hidden),
     Escape: () => {
+      const dismissed = !els.help.hidden || !els.picker.hidden;
       els.help.hidden = true;
       closePicker();
+      if (!dismissed) setPane("sidebar");
     },
     "/": () => els.filter.focus(),
   };

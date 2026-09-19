@@ -177,6 +177,11 @@ button.icon.on { color: var(--text); background: var(--border); }
 
 .content { flex: 1; overflow: auto; min-width: 0; }
 
+/* The focused pane is the one the keyboard drives. */
+.sidebar:focus, .content:focus, .file-list:focus { outline: none; }
+.sidebar.focused { box-shadow: inset -2px 0 0 var(--accent); }
+.content.focused { box-shadow: inset 2px 0 0 var(--accent); }
+
 /* -------------------------------------------------------------- sidebar */
 
 .sidebar-foot {
